@@ -23,10 +23,10 @@ class OverlayWindowController {
             .environmentObject(appState)
 
         let hostingView = NSHostingView(rootView: overlayView)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 200, height: 44)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 300, height: 44)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 44),
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 44),
             styleMask: .borderless,
             backing: .buffered,
             defer: false

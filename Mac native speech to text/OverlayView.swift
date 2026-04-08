@@ -104,6 +104,8 @@ struct OverlayView: View {
             Capsule()
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
+        .animation(.easeInOut(duration: 0.2), value: appState.phase)
+        .frame(maxWidth: .infinity)
         .onAppear {
             dotPhase = 1
         }
