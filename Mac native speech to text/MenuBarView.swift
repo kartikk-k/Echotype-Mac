@@ -30,6 +30,10 @@ struct MenuBarView: View {
 
         Divider()
 
+        Button("Open App...") {
+            appState.onShowMainWindow?()
+        }
+
         Toggle("Launch at Login", isOn: $launchAtLogin)
             .onChange(of: launchAtLogin) { _, newValue in
                 do {
@@ -45,7 +49,7 @@ struct MenuBarView: View {
             }
 
         Button("Setup Permissions...") {
-            appState.onShowOnboarding?()
+            appState.onShowMainWindow?()
         }
 
         Divider()

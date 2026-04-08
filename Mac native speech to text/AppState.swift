@@ -25,7 +25,11 @@ class AppState: ObservableObject {
 
     var onHide: (() -> Void)?
     var onShowOnboarding: (() -> Void)?
+    var onShowMainWindow: (() -> Void)?
     var permissionManager: PermissionManager?
+    var usageTracker: UsageTracker?
+
+    private var recordingStartTime: CFAbsoluteTime = 0
 
     func startListening() {
         if let pm = permissionManager, !pm.allPermissionsGranted {
@@ -40,6 +44,7 @@ class AppState: ObservableObject {
         print("[AppState] === START ===")
         phase = .listening
         transcribedText = ""
+        recordingStartTime = CFAbsoluteTimeGetCurrent()
 
         let session = speechManager.createSession { [weak self] text, isFinal in
             DispatchQueue.main.async {
@@ -52,6 +57,8 @@ class AppState: ObservableObject {
                 } else {
                     print("[AppState] final: \"\(text)\"")
                     if !text.isEmpty {
+                        let duration = CFAbsoluteTimeGetCurrent() - self.recordingStartTime
+                        self.usageTracker?.recordSession(text: text, recordingDuration: duration)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             TextInserter.insert(text)
                             print("[AppState] inserted")

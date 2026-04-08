@@ -11,15 +11,19 @@ import SwiftUI
 class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     let permissionManager = PermissionManager()
+    let usageTracker = UsageTracker()
     private var hotkeyMonitor: HotkeyMonitor?
     private var overlayController: OverlayWindowController?
     private var onboardingController: OnboardingWindowController?
+    private var mainWindowController: MainWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         appState.permissionManager = permissionManager
+        appState.usageTracker = usageTracker
 
         overlayController = OverlayWindowController(appState: appState)
         onboardingController = OnboardingWindowController(permissionManager: permissionManager)
+        mainWindowController = MainWindowController(usageTracker: usageTracker, permissionManager: permissionManager)
 
         appState.onHide = { [weak self] in
             self?.overlayController?.hideImmediately()
@@ -27,6 +31,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         appState.onShowOnboarding = { [weak self] in
             self?.showOnboarding()
+        }
+
+        appState.onShowMainWindow = { [weak self] in
+            self?.showMainWindow()
         }
 
         hotkeyMonitor = HotkeyMonitor(
@@ -45,14 +53,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         hotkeyMonitor?.start()
 
-        // Show onboarding if permissions are missing
-        if !permissionManager.allPermissionsGranted {
-            showOnboarding()
-        }
+        // Show main window on launch (permission setup is embedded in the main window)
+        showMainWindow()
     }
 
     func showOnboarding() {
         onboardingController?.show()
+    }
+
+    func showMainWindow() {
+        mainWindowController?.show()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
