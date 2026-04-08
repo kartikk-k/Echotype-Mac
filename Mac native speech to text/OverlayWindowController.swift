@@ -25,19 +25,21 @@ class OverlayWindowController {
         let hostingView = NSHostingView(rootView: overlayView)
         hostingView.frame = NSRect(x: 0, y: 0, width: 300, height: 44)
 
-        let window = NSWindow(
+        let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 300, height: 44),
-            styleMask: .borderless,
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.level = .floating
-        window.hasShadow = true
-        window.ignoresMouseEvents = false
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary]
-        window.contentView = hostingView
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .floating
+        panel.hasShadow = true
+        panel.ignoresMouseEvents = false
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary]
+        panel.contentView = hostingView
+        let window = panel
 
         // Allow the hosting view to size itself
         hostingView.translatesAutoresizingMaskIntoConstraints = false

@@ -17,11 +17,16 @@ class HotkeyMonitor {
     private let onHotkeyDown: () -> Void
     private let onHotkeyUp: () -> Void
     private let onHandsFreeToggle: () -> Void
+    private let onCancel: () -> Void
 
     // Fn (Globe) key
     private static let fnKeyCode: Int64 = 63
     // Space key
     private static let spaceKeyCode: Int64 = 49
+    // Escape key
+    private static let escapeKeyCode: Int64 = 53
+    // Delete/Backspace key
+    private static let deleteKeyCode: Int64 = 51
 
     /// Whether the event tap is active
     var isRunning: Bool { eventTap != nil }
@@ -32,14 +37,19 @@ class HotkeyMonitor {
     /// Ignore the next Fn release (used when activating hands-free while Fn is held)
     private var ignoreFnRelease = false
 
+    /// Track whether Space is currently held to ignore key-repeat events
+    private var spaceIsDown = false
+
     init(
         onHotkeyDown: @escaping () -> Void,
         onHotkeyUp: @escaping () -> Void,
-        onHandsFreeToggle: @escaping () -> Void
+        onHandsFreeToggle: @escaping () -> Void,
+        onCancel: @escaping () -> Void
     ) {
         self.onHotkeyDown = onHotkeyDown
         self.onHotkeyUp = onHotkeyUp
         self.onHandsFreeToggle = onHandsFreeToggle
+        self.onCancel = onCancel
     }
 
     /// Open System Settings to the Keyboard pane
@@ -52,10 +62,11 @@ class HotkeyMonitor {
     func start() {
         if eventTap != nil { return }
 
-        // Listen for flagsChanged (Fn) and keyDown (Space while Fn held)
+        // Listen for flagsChanged (Fn), keyDown, and keyUp
         let eventMask: CGEventMask =
             (1 << CGEventType.flagsChanged.rawValue) |
-            (1 << CGEventType.keyDown.rawValue)
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.keyUp.rawValue)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -125,27 +136,67 @@ class HotkeyMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-        // MARK: Fn+Space → hands-free toggle
+        // MARK: Key up — track Space release
+        if type == .keyUp {
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            if keyCode == HotkeyMonitor.spaceKeyCode {
+                spaceIsDown = false
+            }
+            // Swallow Space/Escape key-up if hands-free is active to avoid leaking to app
+            if isHandsFree && (keyCode == HotkeyMonitor.spaceKeyCode || keyCode == HotkeyMonitor.escapeKeyCode) {
+                return nil
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        // MARK: Key down handling
         if type == .keyDown {
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
-            // Fn+Space while not already in hands-free → toggle on
-            if keyCode == HotkeyMonitor.spaceKeyCode && fnIsDown && !isHandsFree {
+            // Fn+Space while not already in hands-free → toggle on (only on first press)
+            if keyCode == HotkeyMonitor.spaceKeyCode && fnIsDown && !isHandsFree && !spaceIsDown {
+                spaceIsDown = true
                 print("[HotkeyMonitor] >>> Fn+Space — hands-free toggle ON")
                 ignoreFnRelease = true // don't stop on the upcoming Fn release
                 DispatchQueue.main.async { [weak self] in
                     self?.onHandsFreeToggle()
                 }
-                return nil // swallow the space so it doesn't type
+                return nil
             }
 
-            // Any key press while in hands-free → toggle off
-            if isHandsFree && keyCode == HotkeyMonitor.spaceKeyCode && fnIsDown {
-                print("[HotkeyMonitor] >>> Fn+Space — hands-free toggle OFF")
+            // Swallow Space repeats while held (Fn+Space or during hands-free)
+            if keyCode == HotkeyMonitor.spaceKeyCode && spaceIsDown {
+                return nil
+            }
+
+            // Delete/Backspace → cancel only if actively recording
+            if keyCode == HotkeyMonitor.deleteKeyCode && (isHotkeyHeld || isHandsFree) {
+                print("[HotkeyMonitor] >>> CANCEL (Delete)")
+                isHotkeyHeld = false
+                isHandsFree = false
                 DispatchQueue.main.async { [weak self] in
-                    self?.onHandsFreeToggle()
+                    self?.onCancel()
                 }
                 return nil
+            }
+
+            // In hands-free mode: Space (fresh press) or Escape → stop
+            if isHandsFree {
+                if keyCode == HotkeyMonitor.spaceKeyCode {
+                    spaceIsDown = true
+                    print("[HotkeyMonitor] >>> hands-free OFF (Space)")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onHandsFreeToggle()
+                    }
+                    return nil
+                }
+                if keyCode == HotkeyMonitor.escapeKeyCode {
+                    print("[HotkeyMonitor] >>> hands-free OFF (Escape)")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onHandsFreeToggle()
+                    }
+                    return nil
+                }
             }
 
             return Unmanaged.passUnretained(event)
@@ -168,8 +219,18 @@ class HotkeyMonitor {
             // Fn pressed down
             fnIsDown = true
 
-            // In hands-free mode, ignore Fn hold (only Fn+Space stops it)
+            // In hands-free mode, ignore Fn hold
             if isHandsFree {
+                return nil
+            }
+
+            // Space is already held when Fn comes down → activate hands-free
+            if spaceIsDown {
+                print("[HotkeyMonitor] >>> Fn DOWN while Space held — hands-free toggle ON")
+                ignoreFnRelease = true
+                DispatchQueue.main.async { [weak self] in
+                    self?.onHandsFreeToggle()
+                }
                 return nil
             }
 
@@ -190,11 +251,8 @@ class HotkeyMonitor {
                 return nil
             }
 
+            // In hands-free mode, ignore Fn release — only Fn+Space stops it
             if isHandsFree {
-                print("[HotkeyMonitor] <<< Fn released — ending hands-free mode")
-                DispatchQueue.main.async { [weak self] in
-                    self?.onHandsFreeToggle()
-                }
                 return nil
             }
 

@@ -32,6 +32,17 @@ class AppState: ObservableObject {
 
     private var recordingStartTime: CFAbsoluteTime = 0
 
+    /// Ensure text ends with sentence-ending punctuation and a trailing space.
+    private func finalize(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return trimmed }
+        let lastChar = trimmed.last!
+        if [".", "!", "?", "…"].contains(String(lastChar)) {
+            return trimmed + " "
+        }
+        return trimmed + ". "
+    }
+
     func startListening() {
         if let pm = permissionManager, !pm.allPermissionsGranted {
             phase = .permissionDenied
@@ -59,7 +70,7 @@ class AppState: ObservableObject {
                 } else {
                     print("[AppState] final: \"\(text)\"")
                     if !text.isEmpty {
-                        let processed = self.snippetManager?.applySnippets(to: text) ?? text
+                        let processed = self.finalize(self.snippetManager?.applySnippets(to: text) ?? text)
                         let duration = CFAbsoluteTimeGetCurrent() - self.recordingStartTime
                         self.usageTracker?.recordSession(text: processed, recordingDuration: duration)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -93,7 +104,7 @@ class AppState: ObservableObject {
             guard let self = self, self.phase == .processing else { return }
             let text = self.transcribedText
             if !text.isEmpty {
-                let processed = self.snippetManager?.applySnippets(to: text) ?? text
+                let processed = self.finalize(self.snippetManager?.applySnippets(to: text) ?? text)
                 TextInserter.insert(processed)
             }
             VolumeManager.shared.restoreSystem()

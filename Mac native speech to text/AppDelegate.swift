@@ -56,6 +56,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             onHandsFreeToggle: { [weak self] in
                 guard let self = self else { return }
                 self.toggleHandsFree()
+            },
+            onCancel: { [weak self] in
+                self?.appState.cancelListening()
             }
         )
         hotkeyMonitor?.start()
