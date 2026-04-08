@@ -57,7 +57,10 @@ struct HomeTabView: View {
                     dsCard {
                         HStack(spacing: 24) {
                             statItem(value: dsFormattedCount(usage.todayWords), label: "words")
+                                .frame(maxWidth: .infinity)
+                            Rectangle().fill(Color.white.opacity(0.07)).frame(width: 1, height: 36)
                             statItem(value: "\(usage.todaySessions)", label: "sessions")
+                                .frame(maxWidth: .infinity)
                         }
                     }
                 }

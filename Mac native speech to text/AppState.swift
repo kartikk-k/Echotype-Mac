@@ -45,6 +45,7 @@ class AppState: ObservableObject {
         phase = .listening
         transcribedText = ""
         recordingStartTime = CFAbsoluteTimeGetCurrent()
+        VolumeManager.shared.muteSystem()
 
         let session = speechManager.createSession { [weak self] text, isFinal in
             DispatchQueue.main.async {
@@ -64,6 +65,7 @@ class AppState: ObservableObject {
                             print("[AppState] inserted")
                         }
                     }
+                    VolumeManager.shared.restoreSystem()
                     self.phase = .hidden
                     self.onHide?()
                 }
@@ -91,6 +93,7 @@ class AppState: ObservableObject {
             if !text.isEmpty {
                 TextInserter.insert(text)
             }
+            VolumeManager.shared.restoreSystem()
             self.phase = .hidden
             self.onHide?()
         }
@@ -100,6 +103,7 @@ class AppState: ObservableObject {
         print("[AppState] === CANCEL ===")
         currentSession?.cancel()
         currentSession = nil
+        VolumeManager.shared.restoreSystem()
         phase = .hidden
         transcribedText = ""
         onHide?()
