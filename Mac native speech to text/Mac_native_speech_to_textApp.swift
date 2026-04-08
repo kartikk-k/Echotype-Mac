@@ -16,7 +16,7 @@ struct Mac_native_speech_to_textApp: App {
             MenuBarView()
                 .environmentObject(appDelegate.appState)
         } label: {
-            Image(systemName: appDelegate.appState.isListening ? "mic.fill" : "mic")
+            Image(systemName: appDelegate.appState.phase == .hidden ? "mic" : "mic.fill")
         }
     }
 }

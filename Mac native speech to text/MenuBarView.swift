@@ -12,17 +12,14 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if appState.isListening {
+            switch appState.phase {
+            case .listening:
                 Text("Listening...")
                     .font(.headline)
-            } else if !appState.lastTranscription.isEmpty {
-                Text("Last transcription:")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text(appState.lastTranscription)
-                    .font(.body)
-                    .lineLimit(3)
-            } else {
+            case .processing:
+                Text("Processing...")
+                    .font(.headline)
+            case .hidden:
                 Text("Hold ⌃⌥ (Ctrl+Option) to dictate")
                     .font(.body)
             }

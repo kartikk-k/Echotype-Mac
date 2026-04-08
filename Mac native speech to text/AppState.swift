@@ -9,69 +9,84 @@ import Foundation
 import Combine
 import AppKit
 
+enum RecognitionPhase {
+    case hidden
+    case listening
+    case processing
+}
+
 class AppState: ObservableObject {
-    @Published var isListening = false
+    @Published var phase: RecognitionPhase = .hidden
     @Published var transcribedText = ""
-    @Published var lastTranscription = ""
 
-    private var speechManager: SpeechManager?
+    private let speechManager = SpeechManager()
+    private var currentSession: SpeechSession?
 
-    init() {
-        speechManager = SpeechManager { [weak self] text, isFinal in
+    var onHide: (() -> Void)?
+
+    func startListening() {
+        if let old = currentSession {
+            if old.isRecording { old.cancel() }
+        }
+
+        print("[AppState] === START ===")
+        phase = .listening
+        transcribedText = ""
+
+        let session = speechManager.createSession { [weak self] text, isFinal in
             DispatchQueue.main.async {
-                print("[AppState] received text: \"\(text)\" (final: \(isFinal))")
-                self?.transcribedText = text
-                if isFinal {
-                    self?.lastTranscription = text
+                guard let self = self else { return }
+
+                if !isFinal {
+                    if self.phase == .processing {
+                        self.transcribedText = text
+                    }
+                } else {
+                    print("[AppState] final: \"\(text)\"")
+                    if !text.isEmpty {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            TextInserter.insert(text)
+                            print("[AppState] inserted")
+                        }
+                    }
+                    self.phase = .hidden
+                    self.onHide?()
                 }
             }
         }
-    }
 
-    func startListening() {
-        guard !isListening else {
-            print("[AppState] startListening called but already listening")
+        guard let session = session else {
+            phase = .hidden
             return
         }
-        print("[AppState] === START LISTENING ===")
-        isListening = true
-        transcribedText = ""
-        lastTranscription = ""
-        speechManager?.startRecognition()
+
+        currentSession = session
+        session.startRecording()
     }
 
     func stopListening() {
-        guard isListening else {
-            print("[AppState] stopListening called but not listening")
-            return
-        }
-        print("[AppState] === STOP LISTENING ===")
-        isListening = false
-        speechManager?.stopRecognition()
+        guard phase == .listening, let session = currentSession else { return }
+        print("[AppState] === STOP → PROCESSING ===")
+        phase = .processing
+        session.stopAndTranscribe()
 
-        // Grab whatever text we have right now and insert it
-        let textToInsert = transcribedText
-        print("[AppState] text to insert: \"\(textToInsert)\"")
-
-        guard !textToInsert.isEmpty else {
-            print("[AppState] nothing to insert")
-            return
-        }
-        lastTranscription = textToInsert
-
-        // Small delay to let modifier keys fully release before typing
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            print("[AppState] calling TextInserter.insert now")
-            TextInserter.insert(textToInsert)
-            print("[AppState] TextInserter.insert completed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+            guard let self = self, self.phase == .processing else { return }
+            let text = self.transcribedText
+            if !text.isEmpty {
+                TextInserter.insert(text)
+            }
+            self.phase = .hidden
+            self.onHide?()
         }
     }
 
     func cancelListening() {
-        guard isListening else { return }
-        print("[AppState] === CANCEL LISTENING ===")
-        isListening = false
+        print("[AppState] === CANCEL ===")
+        currentSession?.cancel()
+        currentSession = nil
+        phase = .hidden
         transcribedText = ""
-        speechManager?.stopRecognition()
+        onHide?()
     }
 }

@@ -9,174 +9,230 @@ import Foundation
 import Speech
 import AVFoundation
 
-class SpeechManager: @unchecked Sendable {
+/// A single recording+transcription session. Fully independent — multiple can exist.
+class SpeechSession: @unchecked Sendable {
+    let id = UUID()
     private let speechRecognizer: SFSpeechRecognizer?
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
     private var audioEngine: AVAudioEngine?
+    private var audioFile: AVAudioFile?
+    private var tempFileURL: URL?
+    private var recognitionTask: SFSpeechRecognitionTask?
+
+    private var completedSegments: [String] = []
+    private var currentSegmentText = ""
+    private var isTranscribing = false
+    private var doneTimer: DispatchWorkItem?
+
+    private var recordingStartTime: CFAbsoluteTime = 0
     private let onResult: (String, Bool) -> Void
-    private var isRunning = false
-    private var micAuthorized = false
-    private var isStopping = false
+
+    var isRecording = false
 
     init(onResult: @escaping (String, Bool) -> Void) {
         self.onResult = onResult
         self.speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-
-        print("[SpeechManager] init — recognizer available: \(speechRecognizer?.isAvailable ?? false)")
-        print("[SpeechManager] supports on-device: \(speechRecognizer?.supportsOnDeviceRecognition ?? false)")
-
-        requestPermissions()
     }
 
-    private func requestPermissions() {
-        SFSpeechRecognizer.requestAuthorization { status in
-            print("[SpeechManager] speech auth status: \(status.rawValue) (3=authorized)")
-        }
-
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            self.micAuthorized = granted
-            print("[SpeechManager] microphone access granted: \(granted)")
-        }
+    private var fullText: String {
+        let segments = completedSegments + (currentSegmentText.isEmpty ? [] : [currentSegmentText])
+        return segments.joined(separator: " ")
     }
 
-    func startRecognition() {
-        guard !isRunning else {
-            print("[SpeechManager] startRecognition called but already running, ignoring")
-            return
-        }
+    func startRecording() {
+        recordingStartTime = CFAbsoluteTimeGetCurrent()
+        print("[Session \(id.uuidString.prefix(4))] start recording")
 
-        guard micAuthorized else {
-            print("[SpeechManager] ERROR: microphone access not granted")
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                self.micAuthorized = granted
-                print("[SpeechManager] microphone re-request: \(granted)")
-            }
-            return
-        }
-
-        guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
-            print("[SpeechManager] ERROR: speechRecognizer nil or unavailable")
-            return
-        }
-
-        print("[SpeechManager] --- Starting recognition ---")
-
-        isStopping = false
-
-        // Create a fresh audio engine every time to avoid stale inputNode state
         let engine = AVAudioEngine()
         self.audioEngine = engine
 
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-
-        if speechRecognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-            print("[SpeechManager] using on-device recognition")
-        } else {
-            print("[SpeechManager] on-device not supported, using server")
-        }
-
-        self.recognitionRequest = request
-
         let inputNode = engine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
-        print("[SpeechManager] audio format: sampleRate=\(recordingFormat.sampleRate), channels=\(recordingFormat.channelCount)")
 
         guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
-            print("[SpeechManager] ERROR: invalid audio format — no microphone?")
+            print("[Session \(id.uuidString.prefix(4))] ERROR: invalid audio format")
+            return
+        }
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString + ".caf")
+        self.tempFileURL = url
+
+        do {
+            audioFile = try AVAudioFile(forWriting: url, settings: recordingFormat.settings)
+        } catch {
+            print("[Session \(id.uuidString.prefix(4))] ERROR: can't create file: \(error)")
             return
         }
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
+            try? self?.audioFile?.write(from: buffer)
         }
-        print("[SpeechManager] audio tap installed")
 
         engine.prepare()
-
         do {
             try engine.start()
-            isRunning = true
-            print("[SpeechManager] audio engine started")
+            isRecording = true
         } catch {
-            print("[SpeechManager] ERROR: audio engine failed to start: \(error)")
-            tearDown()
+            print("[Session \(id.uuidString.prefix(4))] ERROR: engine start: \(error)")
+        }
+    }
+
+    func stopAndTranscribe() {
+        let recordDuration = Int((CFAbsoluteTimeGetCurrent() - recordingStartTime) * 1000)
+        print("[Session \(id.uuidString.prefix(4))] stop recording [\(recordDuration)ms]")
+
+        guard isRecording else {
+            onResult("", true)
             return
         }
 
+        // Stop engine
+        if let engine = audioEngine, engine.isRunning {
+            engine.stop()
+            engine.inputNode.removeTap(onBus: 0)
+        }
+        audioFile = nil
+        audioEngine = nil
+        isRecording = false
+
+        guard let url = tempFileURL else {
+            onResult("", true)
+            return
+        }
+
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        guard fileSize > 0 else {
+            onResult("", true)
+            cleanupFile()
+            return
+        }
+
+        guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
+            onResult("", true)
+            cleanupFile()
+            return
+        }
+
+        let request = SFSpeechURLRecognitionRequest(url: url)
+        if speechRecognizer.supportsOnDeviceRecognition {
+            request.requiresOnDeviceRecognition = true
+        }
+
+        isTranscribing = true
+        completedSegments = []
+        currentSegmentText = ""
+        var lastResultText = ""
+        let tStart = CFAbsoluteTimeGetCurrent()
+        let tag = String(id.uuidString.prefix(4))
+
         recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self = self else { return }
+            guard let self = self, self.isTranscribing else { return }
+            let elapsed = Int((CFAbsoluteTimeGetCurrent() - tStart) * 1000)
 
             if let result = result {
                 let text = result.bestTranscription.formattedString
-                let isFinal = result.isFinal
-                print("[SpeechManager] result: \"\(text)\" (final: \(isFinal))")
-                self.onResult(text, isFinal)
+
+                if text.count < lastResultText.count / 2 && !lastResultText.isEmpty {
+                    self.completedSegments.append(lastResultText)
+                    self.currentSegmentText = text
+                } else {
+                    self.currentSegmentText = text
+                }
+                lastResultText = text
+
+                if result.isFinal {
+                    self.completedSegments.append(text)
+                    self.currentSegmentText = ""
+                    lastResultText = ""
+                    print("[Session \(tag)] [\(elapsed)ms] segment finalized")
+                }
+
+                DispatchQueue.main.async {
+                    self.onResult(self.fullText, false)
+                }
+
+                self.resetDoneTimer(tStart: tStart, recordDuration: recordDuration)
             }
 
             if let error = error {
                 let code = (error as NSError).code
-                // Code 216 = "request was canceled" — expected when we call stopRecognition
-                if code != 216 {
-                    print("[SpeechManager] recognition error: \(error.localizedDescription) (code: \(code))")
-                } else {
-                    print("[SpeechManager] recognition cancelled (expected)")
-                }
-                self.tearDown()
-            } else if result?.isFinal == true {
-                print("[SpeechManager] final result received, tearing down")
-                self.tearDown()
-            }
-        }
-        print("[SpeechManager] recognition task created")
-    }
-
-    func stopRecognition() {
-        print("[SpeechManager] --- Stopping recognition --- (isRunning: \(isRunning))")
-        guard isRunning, !isStopping else {
-            print("[SpeechManager] not running or already stopping, skip")
-            return
-        }
-        isStopping = true
-
-        // Stop audio first so no more buffers are appended
-        if let engine = audioEngine, engine.isRunning {
-            engine.stop()
-            engine.inputNode.removeTap(onBus: 0)
-            print("[SpeechManager] audio engine stopped")
-        }
-
-        // End audio on the request — this triggers the final result callback
-        recognitionRequest?.endAudio()
-        print("[SpeechManager] endAudio called, waiting for final result...")
-
-        // Safety timeout
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            if self?.isRunning == true {
-                print("[SpeechManager] timeout — forcing teardown")
-                self?.recognitionTask?.cancel()
-                self?.tearDown()
+                print("[Session \(tag)] [\(elapsed)ms] ended (code: \(code))")
+                self.deliverFinal(tStart: tStart, recordDuration: recordDuration)
             }
         }
     }
 
-    private func tearDown() {
-        guard isRunning else { return }
-        print("[SpeechManager] tearDown")
-
-        if let engine = audioEngine, engine.isRunning {
-            engine.stop()
-            engine.inputNode.removeTap(onBus: 0)
-        }
-
-        recognitionRequest = nil
+    func cancel() {
+        doneTimer?.cancel()
+        doneTimer = nil
+        recognitionTask?.cancel()
         recognitionTask = nil
+        if let engine = audioEngine, engine.isRunning {
+            engine.stop()
+            engine.inputNode.removeTap(onBus: 0)
+        }
         audioEngine = nil
-        isRunning = false
-        isStopping = false
+        audioFile = nil
+        isRecording = false
+        isTranscribing = false
+        cleanupFile()
+    }
 
-        print("[SpeechManager] tearDown complete")
+    private func resetDoneTimer(tStart: CFAbsoluteTime, recordDuration: Int) {
+        doneTimer?.cancel()
+        guard !completedSegments.isEmpty else { return }
+
+        let timer = DispatchWorkItem { [weak self] in
+            guard let self = self, self.isTranscribing else { return }
+            self.recognitionTask?.cancel()
+            self.deliverFinal(tStart: tStart, recordDuration: recordDuration)
+        }
+        doneTimer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: timer)
+    }
+
+    private func deliverFinal(tStart: CFAbsoluteTime, recordDuration: Int) {
+        guard isTranscribing else { return }
+        isTranscribing = false
+        doneTimer?.cancel()
+        doneTimer = nil
+
+        let finalText = fullText
+        let totalTime = Int((CFAbsoluteTimeGetCurrent() - tStart) * 1000)
+        print("[Session \(id.uuidString.prefix(4))] DONE: record=\(recordDuration)ms transcribe=\(totalTime)ms → \"\(finalText)\"")
+
+        DispatchQueue.main.async {
+            self.onResult(finalText, true)
+        }
+        cleanupFile()
+    }
+
+    private func cleanupFile() {
+        if let url = tempFileURL {
+            try? FileManager.default.removeItem(at: url)
+            tempFileURL = nil
+        }
+    }
+}
+
+/// Manages permissions and spawns independent SpeechSessions.
+class SpeechManager: @unchecked Sendable {
+    var micAuthorized = false
+
+    init() {
+        SFSpeechRecognizer.requestAuthorization { status in
+            print("[SpeechManager] speech auth: \(status.rawValue)")
+        }
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            self.micAuthorized = granted
+            print("[SpeechManager] mic access: \(granted)")
+        }
+    }
+
+    func createSession(onResult: @escaping (String, Bool) -> Void) -> SpeechSession? {
+        guard micAuthorized else {
+            print("[SpeechManager] ERROR: no mic access")
+            return nil
+        }
+        return SpeechSession(onResult: onResult)
     }
 }
