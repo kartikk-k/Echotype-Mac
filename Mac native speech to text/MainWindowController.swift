@@ -12,10 +12,12 @@ class MainWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let usageTracker: UsageTracker
     private let permissionManager: PermissionManager
+    private let snippetManager: SnippetManager
 
-    init(usageTracker: UsageTracker, permissionManager: PermissionManager) {
+    init(usageTracker: UsageTracker, permissionManager: PermissionManager, snippetManager: SnippetManager) {
         self.usageTracker = usageTracker
         self.permissionManager = permissionManager
+        self.snippetManager = snippetManager
     }
 
     func show() {
@@ -30,6 +32,7 @@ class MainWindowController: NSObject, NSWindowDelegate {
         let mainView = MainWindowView()
             .environment(usageTracker)
             .environment(permissionManager)
+            .environment(snippetManager)
         let hostingView = NSHostingView(rootView: mainView)
 
         let window = NSWindow(

@@ -11,6 +11,7 @@ import SwiftUI
 
 enum MainTab: String, CaseIterable {
     case home = "Home"
+    case snippets = "Snippets"
     case stats = "Stats"
     case settings = "Settings"
     case invite = "Invite"
@@ -18,6 +19,7 @@ enum MainTab: String, CaseIterable {
     var icon: String {
         switch self {
         case .home: return "house.fill"
+        case .snippets: return "text.quote"
         case .stats: return "chart.bar.xaxis.ascending"
         case .settings: return "gearshape.fill"
         case .invite: return "person.badge.plus"
@@ -41,6 +43,8 @@ struct MainWindowView: View {
                         switch selectedTab {
                         case .home:
                             HomeTabView()
+                        case .snippets:
+                            SnippetsTabView()
                         case .stats:
                             StatsTabView()
                         case .settings:

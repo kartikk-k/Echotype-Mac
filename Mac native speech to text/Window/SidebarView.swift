@@ -10,7 +10,7 @@ import SwiftUI
 struct SidebarView: View {
     @Binding var selectedTab: MainTab
 
-    private let mainNav: [MainTab] = [.home, .stats]
+    private let mainNav: [MainTab] = [.home, .snippets, .stats]
 
     var body: some View {
         VStack(spacing: 0) {

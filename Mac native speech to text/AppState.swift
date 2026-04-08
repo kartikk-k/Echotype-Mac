@@ -28,6 +28,7 @@ class AppState: ObservableObject {
     var onShowMainWindow: (() -> Void)?
     var permissionManager: PermissionManager?
     var usageTracker: UsageTracker?
+    var snippetManager: SnippetManager?
 
     private var recordingStartTime: CFAbsoluteTime = 0
 
@@ -58,10 +59,11 @@ class AppState: ObservableObject {
                 } else {
                     print("[AppState] final: \"\(text)\"")
                     if !text.isEmpty {
+                        let processed = self.snippetManager?.applySnippets(to: text) ?? text
                         let duration = CFAbsoluteTimeGetCurrent() - self.recordingStartTime
-                        self.usageTracker?.recordSession(text: text, recordingDuration: duration)
+                        self.usageTracker?.recordSession(text: processed, recordingDuration: duration)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            TextInserter.insert(text)
+                            TextInserter.insert(processed)
                             print("[AppState] inserted")
                         }
                     }
@@ -91,7 +93,8 @@ class AppState: ObservableObject {
             guard let self = self, self.phase == .processing else { return }
             let text = self.transcribedText
             if !text.isEmpty {
-                TextInserter.insert(text)
+                let processed = self.snippetManager?.applySnippets(to: text) ?? text
+                TextInserter.insert(processed)
             }
             VolumeManager.shared.restoreSystem()
             self.phase = .hidden
