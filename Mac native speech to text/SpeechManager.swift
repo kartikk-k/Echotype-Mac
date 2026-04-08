@@ -113,6 +113,7 @@ class SpeechSession: @unchecked Sendable {
         }
 
         let request = SFSpeechURLRecognitionRequest(url: url)
+        request.addsPunctuation = true
         if speechRecognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
         }
