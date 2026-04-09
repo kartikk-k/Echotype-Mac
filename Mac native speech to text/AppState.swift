@@ -16,9 +16,19 @@ enum RecognitionPhase {
     case permissionDenied
 }
 
+/// Tracks how the last session ended — used by Learn tab to detect user actions.
+enum SessionEndReason {
+    case none
+    case released       // normal hold-and-release
+    case handsFreeStop  // ended hands-free via Space/Escape/Fn+Space
+    case cancelled      // deleted/cancelled recording
+}
+
 class AppState: ObservableObject {
     @Published var phase: RecognitionPhase = .hidden
     @Published var transcribedText = ""
+    @Published var isHandsFree = false
+    @Published var lastEndReason: SessionEndReason = .none
 
     let audioLevelMonitor = AudioLevelMonitor()
     private let speechManager = SpeechManager()
@@ -118,6 +128,7 @@ class AppState: ObservableObject {
 
     func cancelListening() {
         print("[AppState] === CANCEL ===")
+        lastEndReason = .cancelled
         currentSession?.cancel()
         currentSession = nil
         audioLevelMonitor.reset()

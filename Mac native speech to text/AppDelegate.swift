@@ -25,10 +25,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         overlayController = OverlayWindowController(appState: appState)
         onboardingController = OnboardingWindowController(permissionManager: permissionManager)
-        mainWindowController = MainWindowController(usageTracker: usageTracker, permissionManager: permissionManager, snippetManager: snippetManager)
+        mainWindowController = MainWindowController(usageTracker: usageTracker, permissionManager: permissionManager, snippetManager: snippetManager, appState: appState)
 
         appState.onHide = { [weak self] in
             self?.hotkeyMonitor?.isHandsFree = false
+            self?.appState.isHandsFree = false
             self?.overlayController?.hideImmediately()
         }
 
@@ -50,6 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if self.appState.phase == .permissionDenied {
                     self.overlayController?.hideAfterDelay()
                 } else {
+                    self.appState.lastEndReason = .released
                     self.appState.stopListening()
                 }
             },
@@ -72,11 +74,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Turn off hands-free: stop listening and process
             print("[AppDelegate] Hands-free OFF")
             hotkeyMonitor?.isHandsFree = false
+            appState.isHandsFree = false
+            appState.lastEndReason = .handsFreeStop
             appState.stopListening()
         } else {
             // Turn on hands-free: keep current session running (if already listening)
             print("[AppDelegate] Hands-free ON")
             hotkeyMonitor?.isHandsFree = true
+            appState.isHandsFree = true
             if appState.phase != .listening {
                 // Only start a new session if not already recording
                 appState.startListening()
