@@ -82,7 +82,8 @@ class AppState: ObservableObject {
                 } else {
                     print("[AppState] final: \"\(text)\"")
                     if !text.isEmpty {
-                        let processed = self.finalize(self.snippetManager?.applySnippets(to: text) ?? text)
+                        let postProcessed = PostProcessor.process(text)
+                        let processed = self.finalize(self.snippetManager?.applySnippets(to: postProcessed) ?? postProcessed)
                         let duration = CFAbsoluteTimeGetCurrent() - self.recordingStartTime
                         self.usageTracker?.recordSession(text: processed, recordingDuration: duration)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -117,7 +118,8 @@ class AppState: ObservableObject {
             guard let self = self, self.phase == .processing else { return }
             let text = self.transcribedText
             if !text.isEmpty {
-                let processed = self.finalize(self.snippetManager?.applySnippets(to: text) ?? text)
+                let postProcessed = PostProcessor.process(text)
+                let processed = self.finalize(self.snippetManager?.applySnippets(to: postProcessed) ?? postProcessed)
                 TextInserter.insert(processed)
             }
             VolumeManager.shared.restoreSystem()
